@@ -1,8 +1,6 @@
 import org.apache.log4j.{Level, Logger}
 import org.apache.spark.mllib.recommendation.{ALS, Rating}
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.Row
-
 
 object ModelBasedCF {
   def main(args: Array[String]): Unit = {
@@ -72,8 +70,6 @@ object ModelBasedCF {
 
     val predictionsToString = predictions.map { case ((user, business), rate) => (intToUserMap(user), intToBusinessMap(business), rate)}
 
-    //predictionsToString.sortBy(_._2).sortBy(_._1).take(50).foreach(println)
-
     val MSE = ratesAndPreds.map { case ((user, business), (r1, r2)) =>
       val err = r1 - r2
       err * err
@@ -86,17 +82,19 @@ object ModelBasedCF {
     val btw3And4 = absError.filter(err => 3 <= err && err < 4).count()
     val btw4And5 = absError.filter(err => 4 <= err && err < 5).count()
 
-    println(s"Between 0 and 1 count is $btw0And1")
-    println(s"Between 1 and 2 count is $btw1And2")
-    println(s"Between 2 and 3 count is $btw2And3")
-    println(s"Between 3 and 4 count is $btw3And4")
-    println(s"Between 4 and 5 count is $btw4And5")
+    println(s">=0 and <1: $btw0And1")
+    println(s">=1 and <2: $btw1And2")
+    println(s">=2 and <3: $btw2And3")
+    println(s">=3 and <4: $btw3And4")
+    println(s">=4 and <5: $btw4And5")
 
     val rms = math.sqrt(MSE)
     val rmsRounded = "%.3f".format(rms)
     println(s"Mean Squared Error = $rmsRounded")
 
-    val finalRDD = predictionsToString.sortBy(_._2).sortBy(_._1).map{ case (user, business, rate) => user + ", " + business + ", " + rate}
+    val finalRDD = predictionsToString.sortBy(_._2).sortBy(_._1).map{ case (user, business, rate) =>
+      user + ", " + business + ", " + rate}
+
     finalRDD.coalesce(1)
       .saveAsTextFile("Task1Output.txt")
   }
