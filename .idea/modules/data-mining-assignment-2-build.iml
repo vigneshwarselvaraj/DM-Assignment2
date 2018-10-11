@@ -107,6 +107,8 @@
     <orderEntry type="library" name="scala-sdk-2.11.0" level="project" />
     <orderEntry type="library" name="org.apache.spark:spark-core_2.11:2.3.1" level="project" />
     <orderEntry type="library" name="org.apache.spark:spark-sql_2.11:2.3.1" level="project" />
+    <orderEntry type="library" name="org.apache.spark:spark-graphx_2.11:2.3.1" level="project" />
+    <orderEntry type="library" name="org.apache.spark:spark-mllib_2.11:2.3.1" level="project" />
   </component>
   <component name="SbtModule">
     <option name="buildForId" value="data-mining-assignment-2" />
