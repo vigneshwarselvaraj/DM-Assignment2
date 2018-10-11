@@ -1,9 +1,7 @@
-import org.apache.hadoop.util.hash.Hash
 import org.apache.log4j.{Level, Logger}
-import org.apache.spark.ml.recommendation
 import org.apache.spark.mllib.recommendation.{ALS, Rating}
 import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.functions.hash
+import org.apache.spark.sql.Row
 
 
 object ModelBasedCF {
@@ -19,91 +17,44 @@ object ModelBasedCF {
 
     val sc = spark.sparkContext
 
-    val inputDF = spark.read
-      .format("csv")
-      .option("header", "true")
-      .load("test_review.csv")
-
-    inputDF.show(5)
-
-    val inputData = sc.textFile("test_review.csv")
+    val inputData = sc.textFile("train_review.csv")
     val header_line = inputData.first()
-
-    /*val processedInput = inputData.filter(line => line != header_line)
-                            .map(line => line.split(","))
-                            .map(words => (words(0).toInt, words(1).toInt, words(2).toDouble))*/
-
-    /*val ratings = inputData.filter(line => line != header_line).map(_.split(',') match { case Array(user, business, rate) =>
-                              Rating(user.toInt, business.toInt, rate.toDouble)
-                          })*/
-
-
     case class InitRating(userID: String, businessID: String, rating: Double)
     case class convertedRating(userID: Int, businessID: Int, rating: Double)
 
     val processedInput = inputData.filter(line => line != header_line).map(_.split(',') match { case Array(user, business, rate) =>
     InitRating(user, business, rate.toDouble)})
 
-    val userIdToInt: RDD[(String, Long)] = processedInput.map(_.userID).distinct().zipWithUniqueId()
+    val testData = sc.textFile("test_review.csv")
+    val test_header = testData.first()
+    val processedTest = testData.filter(line => line != test_header).map(_.split(',') match { case Array(user, business, rating) =>
+      InitRating(user, business, rating.toDouble) })
+
+    val testTrainMerged = processedInput ++ processedTest
+
+    val userIdToInt: RDD[(String, Long)] = testTrainMerged.map(_.userID).distinct().zipWithUniqueId()
     val intToUserID: RDD[(Long, String)] =  userIdToInt.map { case (l, r) => (r, l) }
 
-    val businessIdToInt: RDD[(String, Long)] = processedInput.map(_.businessID).distinct().zipWithUniqueId()
+    val businessIdToInt: RDD[(String, Long)] = testTrainMerged.map(_.businessID).distinct().zipWithUniqueId()
     val intToBusinessId: RDD[(Long, String)] = businessIdToInt.map { case (l, r) => (r, l)}
-
 
     val mapID: Map[String, Int] =
       userIdToInt.collect().toMap.mapValues(_.toInt).map(identity)
-
-    mapID.take(5).foreach(println)
-
     val intToUserMap: Map[Long, String] =
       intToUserID.collect().toMap.mapValues(_.toString).map(identity)
 
     val mapBusiness: Map[String, Int] =
       businessIdToInt.collect().toMap.mapValues(_.toInt).map(identity)
-
     val intToBusinessMap: Map[Long, String] =
       intToBusinessId.collect().toMap.mapValues(_.toString).map(identity)
-
-    mapBusiness.take(5).foreach(println)
 
     val ratings = processedInput.map{ r =>
       Rating(mapID(r.userID), mapBusiness(r.businessID), r.rating)
     }
 
-    /*val ratings = processedInput2.map{ r =>
-        Rating(r.userID, r.businessID, r.rating)
-    }*/
-
-    ratings.take(5).foreach(println)
-
-    //val mapRatings = processedInput.map(line => Rating(line(0)(0), line(0)(1), line(1)))
-    val rank = 10
-    val numIterations = 10
-    val model = ALS.train(ratings, rank, numIterations, 0.01)
-
-    /*val usersBusinesses = ratings.map{ case Rating(user, business, rate) => (user, business)}
-    val predictions = model.predict(usersBusinesses).map{ case Rating(user, business, rate) => ((user, business), rate)}
-
-    val ratesAndPreds = ratings.map{ case Rating(user, business, rate) => ((user, business), rate)}.join(predictions)
-
-
-    def roundUp(d: Double) = math.ceil(d).toInt
-
-
-    val MSE = ratesAndPreds.map { case ((user, business), (r1, r2)) =>
-              val err = (r1 - r2)
-              err * err
-    }.mean()
-
-    val MSErounded = "%.2f".format(MSE)
-
-    println(s"Mean Squared Error = $MSErounded")*/
-
-    val testData = sc.textFile("test_review.csv")
-    val test_header = testData.first()
-    val processedTest = testData.filter(line => line != test_header).map(_.split(',') match { case Array(user, business, rating) =>
-      InitRating(user, business, rating.toDouble) })
+    val rank = 3
+    val numIterations = 20
+    val model = ALS.train(ratings, rank, numIterations, 0.3)
 
     val ratings2 = processedTest.map{ r =>
       Rating(mapID(r.userID), mapBusiness(r.businessID), r.rating)
@@ -113,19 +64,20 @@ object ModelBasedCF {
       (mapID(userID), mapBusiness(businessID))
     }
 
-    val predictions = model.predict(testUsersBusinesses).map{ case Rating(user, business, rate) => ((user, business), rate)}
+    val predictions = model.predict(testUsersBusinesses).map{ case Rating(user, business, rate) =>
+      ((user, business), rate)
+    }
+
     val ratesAndPreds = ratings2.map{ case Rating(user, business, rate) => ((user, business), rate)}.join(predictions)
 
-    val predictionsToString = predictions.map { case ((user, business), rate) => ((intToUserMap(user)), intToBusinessMap(business), rate)}
+    val predictionsToString = predictions.map { case ((user, business), rate) => (intToUserMap(user), intToBusinessMap(business), rate)}
 
-    predictionsToString.take(50).foreach(println)
+    //predictionsToString.sortBy(_._2).sortBy(_._1).take(50).foreach(println)
 
     val MSE = ratesAndPreds.map { case ((user, business), (r1, r2)) =>
-      val err = (r1 - r2)
+      val err = r1 - r2
       err * err
     }.mean()
-
-    //val zeroToOne = ratesAndPreds.map { case ((user, business), (r1, r2)) =>
 
     val absError = ratesAndPreds.map{case ((user, business), (r1, r2))  => Math.abs(r1 - r2)}
     val btw0And1 = absError.filter(err => 0 <= err && err < 1).count()
@@ -140,7 +92,12 @@ object ModelBasedCF {
     println(s"Between 3 and 4 count is $btw3And4")
     println(s"Between 4 and 5 count is $btw4And5")
 
-    val MSERounded = "%.2f".format(MSE)
-    println(s"Mean Squared Error = $MSE")
+    val rms = math.sqrt(MSE)
+    val rmsRounded = "%.3f".format(rms)
+    println(s"Mean Squared Error = $rmsRounded")
+
+    val finalRDD = predictionsToString.sortBy(_._2).sortBy(_._1).map{ case (user, business, rate) => user + ", " + business + ", " + rate}
+    finalRDD.coalesce(1)
+      .saveAsTextFile("Task1Output.txt")
   }
 }
