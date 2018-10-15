@@ -1,2 +1,4 @@
 *.csv
 /lib
+src/main/scala/UserBasedCF2.scala
+*.txt
